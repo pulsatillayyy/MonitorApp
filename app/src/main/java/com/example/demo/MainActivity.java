@@ -1,20 +1,37 @@
 package com.example.demo;
 
 import android.Manifest;
+import android.app.AlertDialog;
+import android.content.DialogInterface;
+import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.SurfaceTexture;
+import android.media.MediaPlayer;
+import android.net.Uri;
 import android.opengl.GLSurfaceView;
 import android.os.Bundle;
+import android.os.Environment;
 import android.view.View;
+import android.widget.ArrayAdapter;
 import android.widget.Button;
+import android.widget.ListView;
 import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
+import androidx.core.content.FileProvider;
 
 import com.example.demo.databinding.ActivityMainBinding;
+
+import java.io.File;
+import java.io.FilenameFilter;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.List;
 
 /**
  * 主界面 Activity，负责管理生命周期、权限请求和 UI 交互。
@@ -96,6 +113,92 @@ public class MainActivity extends AppCompatActivity implements CameraRenderer.On
                 glSurfaceView.requestRender();
             }
         });
+        
+        mBinding.btnRecordAudio.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                if (audioHelper.isRecording()) {
+                    audioHelper.stopRecording();
+                    mBinding.btnRecordAudio.setText("Start Record");
+                    File file = audioHelper.getLastRecordedFile();
+                    if (file != null) {
+                        Toast.makeText(MainActivity.this, "Saved: " + file.getName(), Toast.LENGTH_SHORT).show();
+                    }
+                } else {
+                    if (hasPermissions()) {
+                        audioHelper.startRecording();
+                        mBinding.btnRecordAudio.setText("Stop Record");
+                    } else {
+                        Toast.makeText(MainActivity.this, "Need Audio Permission", Toast.LENGTH_SHORT).show();
+                    }
+                }
+            }
+        });
+
+        mBinding.btnViewRecords.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                showRecordListDialog();
+            }
+        });
+    }
+
+    private void showRecordListDialog() {
+        File dir = getExternalFilesDir(Environment.DIRECTORY_MUSIC);
+        if (dir == null || !dir.exists()) {
+            Toast.makeText(this, "No records found", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        File[] files = dir.listFiles(new FilenameFilter() {
+            @Override
+            public boolean accept(File dir, String name) {
+                return name.startsWith("Audio_Cine_") && name.endsWith(".mp4");
+            }
+        });
+
+        if (files == null || files.length == 0) {
+            Toast.makeText(this, "No records found", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        // Sort by last modified (newest first)
+        Arrays.sort(files, new Comparator<File>() {
+            @Override
+            public int compare(File o1, File o2) {
+                return Long.compare(o2.lastModified(), o1.lastModified());
+            }
+        });
+
+        final String[] fileNames = new String[files.length];
+        final File[] finalFiles = files;
+        for (int i = 0; i < files.length; i++) {
+            fileNames[i] = files[i].getName();
+        }
+
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle("Recorded Files");
+        builder.setItems(fileNames, new DialogInterface.OnClickListener() {
+            @Override
+            public void onClick(DialogInterface dialog, int which) {
+                playAudioFile(finalFiles[which]);
+            }
+        });
+        builder.setNegativeButton("Close", null);
+        builder.show();
+    }
+
+    private void playAudioFile(File file) {
+        try {
+            MediaPlayer mediaPlayer = new MediaPlayer();
+            mediaPlayer.setDataSource(file.getAbsolutePath());
+            mediaPlayer.prepare();
+            mediaPlayer.start();
+            Toast.makeText(this, "Playing: " + file.getName(), Toast.LENGTH_SHORT).show();
+        } catch (Exception e) {
+            e.printStackTrace();
+            Toast.makeText(this, "Play failed", Toast.LENGTH_SHORT).show();
+        }
     }
 
     private boolean hasPermissions() {
@@ -135,7 +238,8 @@ public class MainActivity extends AppCompatActivity implements CameraRenderer.On
             public void run() {
                 if (hasPermissions()) {
                     cameraHelper.startCamera(surfaceTexture);
-                    audioHelper.startRecording();
+                    // 不再自动开始录音，由用户手动控制
+                    // audioHelper.startRecording();
                 }
             }
         });
@@ -146,7 +250,10 @@ public class MainActivity extends AppCompatActivity implements CameraRenderer.On
         super.onPause();
         glSurfaceView.onPause(); // 暂停 GL 渲染线程
         cameraHelper.stopCamera(); // 释放相机资源
-        audioHelper.stopRecording(); // 停止录音
+        if (audioHelper.isRecording()) {
+            audioHelper.stopRecording(); // 停止录音
+            mBinding.btnRecordAudio.setText("Start Record");
+        }
     }
 
     @Override
@@ -155,7 +262,7 @@ public class MainActivity extends AppCompatActivity implements CameraRenderer.On
         glSurfaceView.onResume(); // 恢复 GL 渲染线程
         if (hasPermissions() && surfaceTexture != null) {
             cameraHelper.startCamera(surfaceTexture); // 重新打开相机
-            audioHelper.startRecording(); // 重新开始录音
+            // 录音需手动开始
         }
     }
 }

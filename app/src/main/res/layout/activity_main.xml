@@ -17,6 +17,30 @@
         app:layout_constraintTop_toTopOf="parent" />
 
     <LinearLayout
+        android:id="@+id/audio_panel"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="8dp"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintTop_toTopOf="parent">
+
+        <Button
+            android:id="@+id/btn_record_audio"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Start Record" />
+
+        <Button
+            android:id="@+id/btn_view_records"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="View Files" />
+
+    </LinearLayout>
+
+    <LinearLayout
         android:id="@+id/bottom_panel"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
