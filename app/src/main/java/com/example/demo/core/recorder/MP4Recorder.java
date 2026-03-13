@@ -37,6 +37,7 @@ public class MP4Recorder implements IRecorderPipeline, AudioEngine.OnAudioDataLi
 
     private int mVideoTrackIndex = -1;
     private int mAudioTrackIndex = -1;
+    private long mFirstVideoPts = -1;
     private volatile boolean mMuxerStarted = false;
 
     private MediaCodec.BufferInfo mVideoBufferInfo;
@@ -202,6 +203,7 @@ public class MP4Recorder implements IRecorderPipeline, AudioEngine.OnAudioDataLi
     private void drainEncoder(MediaCodec encoder, MediaCodec.BufferInfo bufferInfo, boolean isVideo) {
         int outputBufferIndex = encoder.dequeueOutputBuffer(bufferInfo, 0);
         while (outputBufferIndex >= 0) {
+            Log.d(TAG,"video pts="+bufferInfo.presentationTimeUs + " isVideo =" + isVideo);
             ByteBuffer outputBuffer = encoder.getOutputBuffer(outputBufferIndex);
             
             if ((bufferInfo.flags & MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0) {
@@ -209,6 +211,12 @@ public class MP4Recorder implements IRecorderPipeline, AudioEngine.OnAudioDataLi
             }
 
             if (bufferInfo.size != 0) {
+                if (isVideo) {
+                    if (mFirstVideoPts < 0) {
+                        mFirstVideoPts = bufferInfo.presentationTimeUs;
+                    }
+                    bufferInfo.presentationTimeUs -= mFirstVideoPts;
+                }
                 if (mMuxerStarted) {
                     outputBuffer.position(bufferInfo.offset);
                     outputBuffer.limit(bufferInfo.offset + bufferInfo.size);
