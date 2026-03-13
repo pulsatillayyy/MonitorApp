@@ -2,17 +2,11 @@ package com.example.demo.core.render;
 
 import android.content.Context;
 import android.graphics.SurfaceTexture;
-import android.opengl.EGL14;
-import android.opengl.EGLContext;
-import android.opengl.EGLDisplay;
 import android.opengl.GLES11Ext;
 import android.opengl.GLES20;
 import android.opengl.GLSurfaceView;
-import android.util.Log;
 
 import com.example.demo.R;
-import com.example.demo.core.recorder.IRecorderPipeline;
-import com.example.demo.core.render.egl.WindowSurface;
 import com.example.demo.core.render.filters.ShaderUtils;
 
 import java.nio.ByteBuffer;
@@ -27,7 +21,8 @@ import javax.microedition.khronos.opengles.GL10;
  * 职责：
  * 1. 管理 OES 纹理与 Camera 数据接收
  * 2. 执行 OpenGL 滤镜渲染 (Normal/Monochrome)
- * 3. 负责将渲染结果分发给屏幕和录制器 (Input Surface)
+ * 3. 负责将渲染结果分发给屏幕
+ * (不再负责录制，录制交由 CameraEngine 原生处理)
  */
 public class CineRenderer implements GLSurfaceView.Renderer, SurfaceTexture.OnFrameAvailableListener {
     private static final String TAG = "CineRenderer";
@@ -38,12 +33,6 @@ public class CineRenderer implements GLSurfaceView.Renderer, SurfaceTexture.OnFr
     private SurfaceTexture surfaceTexture;
     private boolean updateSurface = false;
     
-    // 录制相关
-    private IRecorderPipeline mRecorder;
-    private WindowSurface mInputWindowSurface;
-    private EGLDisplay mEGLDisplay;
-    private EGLContext mEGLContext;
-
     // 着色器程序
     private int programNormal;
     private int programMono;
@@ -92,12 +81,6 @@ public class CineRenderer implements GLSurfaceView.Renderer, SurfaceTexture.OnFr
         textureBuffer.position(0);
     }
     
-    public void setRecorder(IRecorderPipeline recorder) {
-        synchronized (this) {
-            this.mRecorder = recorder;
-        }
-    }
-
     public void setFilter(FilterType type) {
         this.currentFilterType = type;
     }
@@ -106,9 +89,6 @@ public class CineRenderer implements GLSurfaceView.Renderer, SurfaceTexture.OnFr
     public void onSurfaceCreated(GL10 gl, EGLConfig config) {
         GLES20.glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
         
-        mEGLDisplay = EGL14.eglGetCurrentDisplay();
-        mEGLContext = EGL14.eglGetCurrentContext();
-
         int[] textures = new int[1];
         GLES20.glGenTextures(1, textures, 0);
         textureId = textures[0];
@@ -149,35 +129,6 @@ public class CineRenderer implements GLSurfaceView.Renderer, SurfaceTexture.OnFr
 
         GLES20.glViewport(0, 0, mWidth, mHeight);
         drawFrame();
-        
-        synchronized (this) {
-            // 录制逻辑：仅当配置了录制器且该录制器提供了 InputSurface (即 OpenGL 模式) 时执行
-            if (mRecorder != null && mRecorder.isRecording() && mRecorder.getInputSurface() != null) {
-                if (mInputWindowSurface == null) {
-                    try {
-                        mInputWindowSurface = new WindowSurface(mEGLDisplay, mEGLContext, mRecorder.getInputSurface());
-                        mInputWindowSurface.makeCurrent();
-                    } catch (Exception e) {
-                        Log.e(TAG, "WindowSurface init failed", e);
-                        mRecorder = null;
-                        return;
-                    }
-                }
-                
-                mInputWindowSurface.makeCurrent();
-                GLES20.glViewport(0, 0, 1920, 1080); // 录制分辨率
-                drawFrame();
-                mInputWindowSurface.setPresentationTime(surfaceTexture.getTimestamp());
-                mInputWindowSurface.swapBuffers();
-                mRecorder.drainVideoEncoder(false);
-                
-            } else {
-                if (mInputWindowSurface != null) {
-                    mInputWindowSurface.release();
-                    mInputWindowSurface = null;
-                }
-            }
-        }
     }
     
     private void drawFrame() {

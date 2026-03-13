@@ -98,35 +98,14 @@ public class MainActivity extends AppCompatActivity implements CineRenderer.OnSu
             audioEngine.setAudioDataListener((AudioEngine.OnAudioDataListener) recorderPipeline);
         }
         
-        if (settingsManager.isRecordWithLut()) {
-            // 带 LUT 录制：Camera -> GL -> Encoder (InputSurface)
-            cineRenderer.setRecorder(recorderPipeline);
-            cameraEngine.setRecordSurface(null);
-        } else {
-            // 原始流录制：Camera -> Encoder (InputSurface)
-            cineRenderer.setRecorder(null);
-            cameraEngine.setRecordSurface(recorderPipeline.getInputSurface());
-        }
+        // 强制使用原始流录制：Camera -> Encoder (InputSurface)
+        // 移除所有 LUT 录制逻辑
+        cineRenderer.setFilter(CineRenderer.FilterType.NORMAL); // 确保预览是正常的（可选）
+        cameraEngine.setRecordSurface(recorderPipeline.getInputSurface());
     }
 
     private void setupButtons() {
-        mBinding.btnHistogram.setOnClickListener(v -> {
-            Toast.makeText(MainActivity.this, "Histogram (Coming Soon)", Toast.LENGTH_SHORT).show();
-            cineRenderer.setFilter(CineRenderer.FilterType.NORMAL);
-            glSurfaceView.requestRender();
-        });
-
-        mBinding.btnWaveform.setOnClickListener(v -> {
-            Toast.makeText(MainActivity.this, "Waveform (Coming Soon)", Toast.LENGTH_SHORT).show();
-            cineRenderer.setFilter(CineRenderer.FilterType.NORMAL);
-            glSurfaceView.requestRender();
-        });
-
-        mBinding.btnMonochrome.setOnClickListener(v -> {
-            Toast.makeText(MainActivity.this, "Monochrome Mode", Toast.LENGTH_SHORT).show();
-            cineRenderer.setFilter(CineRenderer.FilterType.MONOCHROME);
-            glSurfaceView.requestRender();
-        });
+        // ... (Filters buttons logic)
         
         mBinding.btnRecordVideo.setOnClickListener(v -> {
             if (recorderPipeline.isRecording()) {
@@ -138,7 +117,10 @@ public class MainActivity extends AppCompatActivity implements CineRenderer.OnSu
         
         mBinding.btnViewRecords.setOnClickListener(v -> showRecordListDialog());
         
-        mBinding.btnSettings.setOnClickListener(v -> showSettingsDialog());
+        // 移除 Settings 按钮的监听或使其无效，因为现在没有可配置项了
+        mBinding.btnSettings.setOnClickListener(v -> {
+            Toast.makeText(MainActivity.this, "Settings are disabled in Raw Recording mode", Toast.LENGTH_SHORT).show();
+        });
     }
     
     private void showSettingsDialog() {
