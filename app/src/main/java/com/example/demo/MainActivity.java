@@ -98,14 +98,29 @@ public class MainActivity extends AppCompatActivity implements CineRenderer.OnSu
             audioEngine.setAudioDataListener((AudioEngine.OnAudioDataListener) recorderPipeline);
         }
         
-        // 强制使用原始流录制：Camera -> Encoder (InputSurface)
-        // 移除所有 LUT 录制逻辑
         cineRenderer.setFilter(CineRenderer.FilterType.NORMAL); // 确保预览是正常的（可选）
         cameraEngine.setRecordSurface(recorderPipeline.getInputSurface());
     }
 
     private void setupButtons() {
-        // ... (Filters buttons logic)
+        mBinding.btnHistogram.setOnClickListener(v -> {
+            Toast.makeText(MainActivity.this, "Histogram (Coming Soon)", Toast.LENGTH_SHORT).show();
+            cineRenderer.setFilter(CineRenderer.FilterType.NORMAL);
+            glSurfaceView.requestRender();
+        });
+
+        mBinding.btnWaveform.setOnClickListener(v -> {
+            Toast.makeText(MainActivity.this, "Waveform (Coming Soon)", Toast.LENGTH_SHORT).show();
+            cineRenderer.setFilter(CineRenderer.FilterType.NORMAL);
+            glSurfaceView.requestRender();
+        });
+
+        mBinding.btnMonochrome.setOnClickListener(v -> {
+            Toast.makeText(MainActivity.this, "Monochrome Mode", Toast.LENGTH_SHORT).show();
+            cineRenderer.setFilter(CineRenderer.FilterType.MONOCHROME);
+            glSurfaceView.requestRender();
+        });
+
         
         mBinding.btnRecordVideo.setOnClickListener(v -> {
             if (recorderPipeline.isRecording()) {
