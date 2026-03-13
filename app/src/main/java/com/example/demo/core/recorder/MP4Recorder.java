@@ -249,7 +249,7 @@ public class MP4Recorder implements IRecorderPipeline, AudioEngine.OnAudioDataLi
     public void stop() {
         if (!isRecording) return;
         isRecording = false;
-        
+        mFirstVideoPts = -1;
         stopVideoDrainThread();
 
         try {
