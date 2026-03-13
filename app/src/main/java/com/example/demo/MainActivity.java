@@ -2,14 +2,18 @@ package com.example.demo;
 
 import android.Manifest;
 import android.app.AlertDialog;
+import android.content.ContentUris;
 import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.database.Cursor;
 import android.graphics.SurfaceTexture;
 import android.net.Uri;
 import android.opengl.GLSurfaceView;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
+import android.provider.MediaStore;
 import android.view.View;
 import android.widget.Toast;
 
@@ -17,7 +21,6 @@ import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
-import androidx.core.content.FileProvider;
 
 import com.example.demo.core.audio.AudioEngine;
 import com.example.demo.core.camera.CameraEngine;
@@ -27,13 +30,11 @@ import com.example.demo.core.render.CineRenderer;
 import com.example.demo.databinding.ActivityMainBinding;
 import com.example.demo.ui.settings.SettingsManager;
 
-import java.io.File;
-import java.io.FilenameFilter;
 import java.io.IOException;
 import java.text.SimpleDateFormat;
-import java.util.Arrays;
-import java.util.Comparator;
+import java.util.ArrayList;
 import java.util.Date;
+import java.util.List;
 import java.util.Locale;
 
 /**
@@ -81,7 +82,7 @@ public class MainActivity extends AppCompatActivity implements CineRenderer.OnSu
         audioEngine = new AudioEngine(this);
         
         // 默认初始化录制器
-        recorderPipeline = new MP4Recorder(1920, 1080);
+        recorderPipeline = new MP4Recorder(this, 1920, 1080);
         updateRecorderConnections();
 
         setupButtons();
@@ -109,57 +110,35 @@ public class MainActivity extends AppCompatActivity implements CineRenderer.OnSu
     }
 
     private void setupButtons() {
-        mBinding.btnHistogram.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                Toast.makeText(MainActivity.this, "Histogram (Coming Soon)", Toast.LENGTH_SHORT).show();
-                cineRenderer.setFilter(CineRenderer.FilterType.NORMAL);
-                glSurfaceView.requestRender();
-            }
+        mBinding.btnHistogram.setOnClickListener(v -> {
+            Toast.makeText(MainActivity.this, "Histogram (Coming Soon)", Toast.LENGTH_SHORT).show();
+            cineRenderer.setFilter(CineRenderer.FilterType.NORMAL);
+            glSurfaceView.requestRender();
         });
 
-        mBinding.btnWaveform.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                Toast.makeText(MainActivity.this, "Waveform (Coming Soon)", Toast.LENGTH_SHORT).show();
-                cineRenderer.setFilter(CineRenderer.FilterType.NORMAL);
-                glSurfaceView.requestRender();
-            }
+        mBinding.btnWaveform.setOnClickListener(v -> {
+            Toast.makeText(MainActivity.this, "Waveform (Coming Soon)", Toast.LENGTH_SHORT).show();
+            cineRenderer.setFilter(CineRenderer.FilterType.NORMAL);
+            glSurfaceView.requestRender();
         });
 
-        mBinding.btnMonochrome.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                Toast.makeText(MainActivity.this, "Monochrome Mode", Toast.LENGTH_SHORT).show();
-                cineRenderer.setFilter(CineRenderer.FilterType.MONOCHROME);
-                glSurfaceView.requestRender();
+        mBinding.btnMonochrome.setOnClickListener(v -> {
+            Toast.makeText(MainActivity.this, "Monochrome Mode", Toast.LENGTH_SHORT).show();
+            cineRenderer.setFilter(CineRenderer.FilterType.MONOCHROME);
+            glSurfaceView.requestRender();
+        });
+        
+        mBinding.btnRecordVideo.setOnClickListener(v -> {
+            if (recorderPipeline.isRecording()) {
+                stopRecording();
+            } else {
+                startRecording();
             }
         });
         
-        mBinding.btnRecordVideo.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                if (recorderPipeline.isRecording()) {
-                    stopRecording();
-                } else {
-                    startRecording();
-                }
-            }
-        });
+        mBinding.btnViewRecords.setOnClickListener(v -> showRecordListDialog());
         
-        mBinding.btnViewRecords.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                showRecordListDialog();
-            }
-        });
-        
-        mBinding.btnSettings.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                showSettingsDialog();
-            }
-        });
+        mBinding.btnSettings.setOnClickListener(v -> showSettingsDialog());
     }
     
     private void showSettingsDialog() {
@@ -169,29 +148,21 @@ public class MainActivity extends AppCompatActivity implements CineRenderer.OnSu
         
         new AlertDialog.Builder(this)
             .setTitle("Settings")
-            .setMultiChoiceItems(items, checked, new DialogInterface.OnMultiChoiceClickListener() {
-                @Override
-                public void onClick(DialogInterface dialog, int which, boolean isChecked) {
-                    settingsManager.setRecordWithLut(isChecked);
+            .setMultiChoiceItems(items, checked, (dialog, which, isChecked) -> settingsManager.setRecordWithLut(isChecked))
+            .setPositiveButton("OK", (dialog, which) -> {
+                if (recorderPipeline.isRecording()) {
+                    stopRecording();
                 }
-            })
-            .setPositiveButton("OK", new DialogInterface.OnClickListener() {
-                @Override
-                public void onClick(DialogInterface dialog, int which) {
-                    if (recorderPipeline.isRecording()) {
-                        stopRecording();
-                    }
-                    
-                    recorderPipeline = new MP4Recorder(1920, 1080);
-                    updateRecorderConnections();
-                    
-                    if (surfaceTexture != null) {
-                        cameraEngine.stop();
-                        cameraEngine.start(surfaceTexture);
-                    }
-                    
-                    Toast.makeText(MainActivity.this, "Settings Applied", Toast.LENGTH_SHORT).show();
+                
+                recorderPipeline = new MP4Recorder(this, 1920, 1080);
+                updateRecorderConnections();
+                
+                if (surfaceTexture != null) {
+                    cameraEngine.stop();
+                    cameraEngine.start(surfaceTexture);
                 }
+                
+                Toast.makeText(MainActivity.this, "Settings Applied", Toast.LENGTH_SHORT).show();
             })
             .show();
     }
@@ -205,14 +176,9 @@ public class MainActivity extends AppCompatActivity implements CineRenderer.OnSu
         String timeStamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(new Date());
         String prefix = settingsManager.isRecordWithLut() ? "CineLUT_" : "CineRaw_";
         String fileName = prefix + timeStamp + ".mp4";
-        File dir = getExternalFilesDir(Environment.DIRECTORY_MOVIES);
-        if (dir != null && !dir.exists()) {
-            dir.mkdirs();
-        }
-        File file = new File(dir, fileName);
         
         try {
-            recorderPipeline.start(file.getAbsolutePath());
+            recorderPipeline.start(fileName);
             
             if (!audioEngine.isRecording()) {
                 audioEngine.start();
@@ -233,52 +199,90 @@ public class MainActivity extends AppCompatActivity implements CineRenderer.OnSu
     }
     
     private void showRecordListDialog() {
-        File dir = getExternalFilesDir(Environment.DIRECTORY_MOVIES);
-        if (dir == null || !dir.exists()) {
+        List<VideoItem> videoList = new ArrayList<>();
+        
+        Uri collection = MediaStore.Video.Media.EXTERNAL_CONTENT_URI;
+        String[] projection = new String[] {
+            MediaStore.Video.Media._ID,
+            MediaStore.Video.Media.DISPLAY_NAME,
+            MediaStore.Video.Media.DATE_ADDED
+        };
+        String selection = MediaStore.Video.Media.DISPLAY_NAME + " LIKE ?";
+        String[] selectionArgs = new String[] { "Cine%" };
+        String sortOrder = MediaStore.Video.Media.DATE_ADDED + " DESC";
+
+        try (Cursor cursor = getContentResolver().query(collection, projection, selection, selectionArgs, sortOrder)) {
+            if (cursor != null) {
+                int idColumn = cursor.getColumnIndexOrThrow(MediaStore.Video.Media._ID);
+                int nameColumn = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DISPLAY_NAME);
+                
+                while (cursor.moveToNext()) {
+                    long id = cursor.getLong(idColumn);
+                    String name = cursor.getString(nameColumn);
+                    Uri contentUri = ContentUris.withAppendedId(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, id);
+                    videoList.add(new VideoItem(id, name, contentUri));
+                }
+            }
+        }
+
+        if (videoList.isEmpty()) {
             Toast.makeText(this, "No records found", Toast.LENGTH_SHORT).show();
             return;
         }
 
-        File[] files = dir.listFiles(new FilenameFilter() {
-            @Override
-            public boolean accept(File dir, String name) {
-                return (name.startsWith("CineLUT_") || name.startsWith("CineRaw_")) && name.endsWith(".mp4");
-            }
-        });
-
-        if (files == null || files.length == 0) {
-            Toast.makeText(this, "No records found", Toast.LENGTH_SHORT).show();
-            return;
+        String[] items = new String[videoList.size()];
+        for (int i = 0; i < videoList.size(); i++) {
+            items[i] = videoList.get(i).name;
         }
 
-        Arrays.sort(files, new Comparator<File>() {
-            @Override
-            public int compare(File o1, File o2) {
-                return Long.compare(o2.lastModified(), o1.lastModified());
-            }
-        });
-
-        final String[] fileNames = new String[files.length];
-        final File[] finalFiles = files;
-        for (int i = 0; i < files.length; i++) {
-            fileNames[i] = files[i].getName();
-        }
-
-        AlertDialog.Builder builder = new AlertDialog.Builder(this);
-        builder.setTitle("Recorded Videos");
-        builder.setItems(fileNames, new DialogInterface.OnClickListener() {
-            @Override
-            public void onClick(DialogInterface dialog, int which) {
-                playVideoFile(finalFiles[which]);
-            }
-        });
-        builder.setNegativeButton("Close", null);
-        builder.show();
+        new AlertDialog.Builder(this)
+            .setTitle("Recorded Videos")
+            .setItems(items, (dialog, which) -> showVideoOptionsDialog(videoList.get(which)))
+            .setNegativeButton("Close", null)
+            .show();
     }
 
-    private void playVideoFile(File file) {
+    private static class VideoItem {
+        long id;
+        String name;
+        Uri uri;
+        VideoItem(long id, String name, Uri uri) {
+            this.id = id;
+            this.name = name;
+            this.uri = uri;
+        }
+    }
+    
+    private void showVideoOptionsDialog(final VideoItem item) {
+        String[] options = {"Play", "Delete"};
+        new AlertDialog.Builder(this)
+            .setTitle(item.name)
+            .setItems(options, (dialog, which) -> {
+                if (which == 0) {
+                    playVideoUri(item.uri);
+                } else {
+                    deleteVideo(item);
+                }
+            })
+            .show();
+    }
+
+    private void deleteVideo(VideoItem item) {
+        try {
+            int rows = getContentResolver().delete(item.uri, null, null);
+            if (rows > 0) {
+                Toast.makeText(this, "Deleted: " + item.name, Toast.LENGTH_SHORT).show();
+            } else {
+                Toast.makeText(this, "Delete failed", Toast.LENGTH_SHORT).show();
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+            Toast.makeText(this, "Error deleting file", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void playVideoUri(Uri uri) {
         Intent intent = new Intent(Intent.ACTION_VIEW);
-        Uri uri = FileProvider.getUriForFile(this, getPackageName() + ".fileprovider", file);
         intent.setDataAndType(uri, "video/mp4");
         intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
         try {
@@ -316,13 +320,10 @@ public class MainActivity extends AppCompatActivity implements CineRenderer.OnSu
     @Override
     public void onSurfaceTextureCreated(final SurfaceTexture st) {
         this.surfaceTexture = st;
-        runOnUiThread(new Runnable() {
-            @Override
-            public void run() {
-                if (hasPermissions()) {
-                    cameraEngine.start(surfaceTexture);
-                    audioEngine.start();
-                }
+        runOnUiThread(() -> {
+            if (hasPermissions()) {
+                cameraEngine.start(surfaceTexture);
+                audioEngine.start();
             }
         });
     }

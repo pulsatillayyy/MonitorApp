@@ -1,27 +1,35 @@
 package com.example.demo.core.recorder;
 
+import android.content.ContentResolver;
+import android.content.ContentValues;
+import android.content.Context;
 import android.media.MediaCodec;
 import android.media.MediaCodecInfo;
 import android.media.MediaFormat;
 import android.media.MediaMuxer;
+import android.net.Uri;
+import android.os.Build;
+import android.os.Environment;
+import android.os.ParcelFileDescriptor;
+import android.provider.MediaStore;
 import android.util.Log;
 import android.view.Surface;
 
 import com.example.demo.core.audio.AudioEngine;
 
+import java.io.FileDescriptor;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 
 /**
  * MP4 录制器实现
- * 1. 实现了 AudioEngine.OnAudioDataListener，接收音频 PCM 数据
- * 2. 实现了 IRecorderPipeline，提供视频 Input Surface
  */
 public class MP4Recorder implements IRecorderPipeline, AudioEngine.OnAudioDataListener {
     private static final String TAG = "MP4Recorder";
     private static final String VIDEO_MIME = "video/avc";
     private static final String AUDIO_MIME = "audio/mp4a-latm";
 
+    private final Context context;
     private MediaMuxer mMuxer;
     private MediaCodec mVideoEncoder;
     private MediaCodec mAudioEncoder;
@@ -39,17 +47,52 @@ public class MP4Recorder implements IRecorderPipeline, AudioEngine.OnAudioDataLi
 
     private int mWidth = 1920;
     private int mHeight = 1080;
+    
+    private Uri mCurrentVideoUri;
+    private ParcelFileDescriptor mPfd;
 
-    public MP4Recorder(int width, int height) {
+    public MP4Recorder(Context context, int width, int height) {
+        this.context = context;
         this.mWidth = width;
         this.mHeight = height;
     }
 
     @Override
-    public void start(String outputPath) throws IOException {
+    public void start(String fileName) throws IOException {
         if (isRecording) return;
+        
+        // 使用 MediaStore 创建文件，确保相册可见
+        ContentValues values = new ContentValues();
+        values.put(MediaStore.Video.Media.DISPLAY_NAME, fileName);
+        values.put(MediaStore.Video.Media.MIME_TYPE, "video/mp4");
+        values.put(MediaStore.Video.Media.DATE_ADDED, System.currentTimeMillis() / 1000);
+        values.put(MediaStore.Video.Media.DATE_TAKEN, System.currentTimeMillis());
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            values.put(MediaStore.Video.Media.RELATIVE_PATH, Environment.DIRECTORY_MOVIES + "/CineMonitor");
+            values.put(MediaStore.Video.Media.IS_PENDING, 1); // 标记为处理中
+        }
 
-        mMuxer = new MediaMuxer(outputPath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);
+        ContentResolver resolver = context.getContentResolver();
+        mCurrentVideoUri = resolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values);
+        
+        if (mCurrentVideoUri == null) {
+            throw new IOException("Failed to create MediaStore entry");
+        }
+
+        try {
+            mPfd = resolver.openFileDescriptor(mCurrentVideoUri, "w");
+            if (mPfd == null) throw new IOException("Failed to open file descriptor");
+            
+            FileDescriptor fd = mPfd.getFileDescriptor();
+            mMuxer = new MediaMuxer(fd, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);
+        } catch (IOException e) {
+            // 清理
+            if (mCurrentVideoUri != null) {
+                resolver.delete(mCurrentVideoUri, null, null);
+            }
+            throw e;
+        }
+
         mVideoBufferInfo = new MediaCodec.BufferInfo();
         mAudioBufferInfo = new MediaCodec.BufferInfo();
 
@@ -189,6 +232,19 @@ public class MP4Recorder implements IRecorderPipeline, AudioEngine.OnAudioDataLi
                 mMuxer.release();
                 mMuxer = null;
             }
+            
+            if (mPfd != null) {
+                mPfd.close();
+                mPfd = null;
+            }
+            
+            // 更新 MediaStore 状态，标记为完成
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && mCurrentVideoUri != null) {
+                ContentValues values = new ContentValues();
+                values.put(MediaStore.Video.Media.IS_PENDING, 0);
+                context.getContentResolver().update(mCurrentVideoUri, values, null, null);
+            }
+            
         } catch (Exception e) {
             e.printStackTrace();
         }
