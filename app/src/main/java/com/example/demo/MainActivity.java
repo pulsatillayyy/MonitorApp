@@ -1,40 +1,65 @@
 package com.example.demo;
 
 import android.Manifest;
+import android.app.AlertDialog;
+import android.content.DialogInterface;
+import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.SurfaceTexture;
+import android.net.Uri;
 import android.opengl.GLSurfaceView;
 import android.os.Bundle;
+import android.os.Environment;
 import android.view.View;
-import android.widget.Button;
 import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
+import androidx.core.content.FileProvider;
 
+import com.example.demo.core.audio.AudioEngine;
+import com.example.demo.core.camera.CameraEngine;
+import com.example.demo.core.recorder.IRecorderPipeline;
+import com.example.demo.core.recorder.MP4Recorder;
+import com.example.demo.core.render.CineRenderer;
 import com.example.demo.databinding.ActivityMainBinding;
+import com.example.demo.ui.settings.SettingsManager;
+
+import java.io.File;
+import java.io.FilenameFilter;
+import java.io.IOException;
+import java.text.SimpleDateFormat;
+import java.util.Arrays;
+import java.util.Comparator;
+import java.util.Date;
+import java.util.Locale;
 
 /**
- * 主界面 Activity，负责管理生命周期、权限请求和 UI 交互。
- * 实现了 CameraRenderer.OnSurfaceTextureCreatedListener 接口，
- * 当 OpenGL 纹理创建完成后，启动相机预览。
+ * 主界面 Activity
+ * 职责：
+ * 1. 组装各个核心模块 (Camera, Audio, Render, Recorder)
+ * 2. 处理 UI 事件与生命周期
+ * 3. 处理权限
  */
-public class MainActivity extends AppCompatActivity implements CameraRenderer.OnSurfaceTextureCreatedListener {
+public class MainActivity extends AppCompatActivity implements CineRenderer.OnSurfaceTextureCreatedListener {
 
+    private static final String TAG = "MainActivity";
     private static final int PERMISSION_REQUEST_CODE = 100;
-    // 需要请求的权限：相机和录音
     private static final String[] PERMISSIONS = {
             Manifest.permission.CAMERA,
             Manifest.permission.RECORD_AUDIO
     };
 
     private GLSurfaceView glSurfaceView;
-    private CameraRenderer cameraRenderer;
-    private CameraHelper cameraHelper;
-    private AudioHelper audioHelper;
-    private SurfaceTexture surfaceTexture; // 由 Renderer 创建的 SurfaceTexture，用于接收相机数据
+    private CineRenderer cineRenderer;
+    private CameraEngine cameraEngine;
+    private AudioEngine audioEngine;
+    private IRecorderPipeline recorderPipeline;
+    private SettingsManager settingsManager;
+    
+    private SurfaceTexture surfaceTexture; 
     private ActivityMainBinding mBinding;
 
     @Override
@@ -43,26 +68,43 @@ public class MainActivity extends AppCompatActivity implements CameraRenderer.On
         mBinding = ActivityMainBinding.inflate(getLayoutInflater());
         setContentView(mBinding.getRoot());
 
-        // 初始化 GLSurfaceView
-//        glSurfaceView = findViewById(R.id.gl_surface_view);
-        glSurfaceView = mBinding.glSurfaceView;
-        glSurfaceView.setEGLContextClientVersion(2); // 使用 OpenGL ES 2.0
+        settingsManager = new SettingsManager(this);
 
-        // 初始化渲染器并设置给 GLSurfaceView
-        cameraRenderer = new CameraRenderer(this, glSurfaceView, this);
-        glSurfaceView.setRenderer(cameraRenderer);
-        // 设置渲染模式为脏模式（按需渲染），当有新帧时手动请求渲染
+        glSurfaceView = mBinding.glSurfaceView;
+        glSurfaceView.setEGLContextClientVersion(2);
+
+        cineRenderer = new CineRenderer(this, glSurfaceView, this);
+        glSurfaceView.setRenderer(cineRenderer);
         glSurfaceView.setRenderMode(GLSurfaceView.RENDERMODE_WHEN_DIRTY);
 
-        // 初始化相机和音频助手类
-        cameraHelper = new CameraHelper(this);
-        audioHelper = new AudioHelper(this);
+        cameraEngine = new CameraEngine(this);
+        audioEngine = new AudioEngine(this);
+        
+        // 默认初始化录制器
+        recorderPipeline = new MP4Recorder(1920, 1080);
+        updateRecorderConnections();
 
         setupButtons();
 
-        // 检查并请求权限
         if (!hasPermissions()) {
             ActivityCompat.requestPermissions(this, PERMISSIONS, PERMISSION_REQUEST_CODE);
+        }
+    }
+    
+    private void updateRecorderConnections() {
+        // 连接音频：AudioEngine -> Recorder
+        if (recorderPipeline instanceof AudioEngine.OnAudioDataListener) {
+            audioEngine.setAudioDataListener((AudioEngine.OnAudioDataListener) recorderPipeline);
+        }
+        
+        if (settingsManager.isRecordWithLut()) {
+            // 带 LUT 录制：Camera -> GL -> Encoder (InputSurface)
+            cineRenderer.setRecorder(recorderPipeline);
+            cameraEngine.setRecordSurface(null);
+        } else {
+            // 原始流录制：Camera -> Encoder (InputSurface)
+            cineRenderer.setRecorder(null);
+            cameraEngine.setRecordSurface(recorderPipeline.getInputSurface());
         }
     }
 
@@ -70,9 +112,8 @@ public class MainActivity extends AppCompatActivity implements CameraRenderer.On
         mBinding.btnHistogram.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                // 目前切换回普通模式，因为直方图绘制尚未完全实现
-                Toast.makeText(MainActivity.this, "直方图模式 (尚未完全实现)", Toast.LENGTH_SHORT).show();
-                cameraRenderer.setFilter(CameraRenderer.FilterType.NORMAL);
+                Toast.makeText(MainActivity.this, "Histogram (Coming Soon)", Toast.LENGTH_SHORT).show();
+                cineRenderer.setFilter(CineRenderer.FilterType.NORMAL);
                 glSurfaceView.requestRender();
             }
         });
@@ -80,9 +121,8 @@ public class MainActivity extends AppCompatActivity implements CameraRenderer.On
         mBinding.btnWaveform.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                // 目前切换回普通模式，因为波形图绘制尚未完全实现
-                Toast.makeText(MainActivity.this, "波形图模式 (尚未完全实现)", Toast.LENGTH_SHORT).show();
-                cameraRenderer.setFilter(CameraRenderer.FilterType.NORMAL);
+                Toast.makeText(MainActivity.this, "Waveform (Coming Soon)", Toast.LENGTH_SHORT).show();
+                cineRenderer.setFilter(CineRenderer.FilterType.NORMAL);
                 glSurfaceView.requestRender();
             }
         });
@@ -90,12 +130,162 @@ public class MainActivity extends AppCompatActivity implements CameraRenderer.On
         mBinding.btnMonochrome.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                // 切换到单色（黑白）滤镜模式
-                Toast.makeText(MainActivity.this, "单色滤镜模式", Toast.LENGTH_SHORT).show();
-                cameraRenderer.setFilter(CameraRenderer.FilterType.MONOCHROME);
+                Toast.makeText(MainActivity.this, "Monochrome Mode", Toast.LENGTH_SHORT).show();
+                cineRenderer.setFilter(CineRenderer.FilterType.MONOCHROME);
                 glSurfaceView.requestRender();
             }
         });
+        
+        mBinding.btnRecordVideo.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                if (recorderPipeline.isRecording()) {
+                    stopRecording();
+                } else {
+                    startRecording();
+                }
+            }
+        });
+        
+        mBinding.btnViewRecords.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                showRecordListDialog();
+            }
+        });
+        
+        mBinding.btnSettings.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                showSettingsDialog();
+            }
+        });
+    }
+    
+    private void showSettingsDialog() {
+        boolean current = settingsManager.isRecordWithLut();
+        String[] items = {"Record with LUT (Filter)"};
+        boolean[] checked = {current};
+        
+        new AlertDialog.Builder(this)
+            .setTitle("Settings")
+            .setMultiChoiceItems(items, checked, new DialogInterface.OnMultiChoiceClickListener() {
+                @Override
+                public void onClick(DialogInterface dialog, int which, boolean isChecked) {
+                    settingsManager.setRecordWithLut(isChecked);
+                }
+            })
+            .setPositiveButton("OK", new DialogInterface.OnClickListener() {
+                @Override
+                public void onClick(DialogInterface dialog, int which) {
+                    if (recorderPipeline.isRecording()) {
+                        stopRecording();
+                    }
+                    
+                    recorderPipeline = new MP4Recorder(1920, 1080);
+                    updateRecorderConnections();
+                    
+                    if (surfaceTexture != null) {
+                        cameraEngine.stop();
+                        cameraEngine.start(surfaceTexture);
+                    }
+                    
+                    Toast.makeText(MainActivity.this, "Settings Applied", Toast.LENGTH_SHORT).show();
+                }
+            })
+            .show();
+    }
+    
+    private void startRecording() {
+        if (!hasPermissions()) {
+            Toast.makeText(this, "Need permissions", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        
+        String timeStamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(new Date());
+        String prefix = settingsManager.isRecordWithLut() ? "CineLUT_" : "CineRaw_";
+        String fileName = prefix + timeStamp + ".mp4";
+        File dir = getExternalFilesDir(Environment.DIRECTORY_MOVIES);
+        if (dir != null && !dir.exists()) {
+            dir.mkdirs();
+        }
+        File file = new File(dir, fileName);
+        
+        try {
+            recorderPipeline.start(file.getAbsolutePath());
+            
+            if (!audioEngine.isRecording()) {
+                audioEngine.start();
+            }
+            
+            mBinding.btnRecordVideo.setText("Stop REC");
+            Toast.makeText(this, "Recording Started", Toast.LENGTH_SHORT).show();
+        } catch (IOException e) {
+            e.printStackTrace();
+            Toast.makeText(this, "Start failed: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+        }
+    }
+    
+    private void stopRecording() {
+        recorderPipeline.stop();
+        mBinding.btnRecordVideo.setText("REC Video");
+        Toast.makeText(this, "Recording Saved", Toast.LENGTH_SHORT).show();
+    }
+    
+    private void showRecordListDialog() {
+        File dir = getExternalFilesDir(Environment.DIRECTORY_MOVIES);
+        if (dir == null || !dir.exists()) {
+            Toast.makeText(this, "No records found", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        File[] files = dir.listFiles(new FilenameFilter() {
+            @Override
+            public boolean accept(File dir, String name) {
+                return (name.startsWith("CineLUT_") || name.startsWith("CineRaw_")) && name.endsWith(".mp4");
+            }
+        });
+
+        if (files == null || files.length == 0) {
+            Toast.makeText(this, "No records found", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        Arrays.sort(files, new Comparator<File>() {
+            @Override
+            public int compare(File o1, File o2) {
+                return Long.compare(o2.lastModified(), o1.lastModified());
+            }
+        });
+
+        final String[] fileNames = new String[files.length];
+        final File[] finalFiles = files;
+        for (int i = 0; i < files.length; i++) {
+            fileNames[i] = files[i].getName();
+        }
+
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle("Recorded Videos");
+        builder.setItems(fileNames, new DialogInterface.OnClickListener() {
+            @Override
+            public void onClick(DialogInterface dialog, int which) {
+                playVideoFile(finalFiles[which]);
+            }
+        });
+        builder.setNegativeButton("Close", null);
+        builder.show();
+    }
+
+    private void playVideoFile(File file) {
+        Intent intent = new Intent(Intent.ACTION_VIEW);
+        Uri uri = FileProvider.getUriForFile(this, getPackageName() + ".fileprovider", file);
+        intent.setDataAndType(uri, "video/mp4");
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        try {
+            startActivity(intent);
+        } catch (Exception e) {
+            Toast.makeText(this, "No video player found", Toast.LENGTH_SHORT).show();
+        }
     }
 
     private boolean hasPermissions() {
@@ -112,21 +302,17 @@ public class MainActivity extends AppCompatActivity implements CameraRenderer.On
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode == PERMISSION_REQUEST_CODE) {
             if (hasPermissions()) {
-                // 权限已授予，如果 SurfaceTexture 已就绪，则启动相机
                 if (surfaceTexture != null) {
-                    cameraHelper.startCamera(surfaceTexture);
+                    cameraEngine.start(surfaceTexture);
+                    audioEngine.start();
                 }
             } else {
-                Toast.makeText(this, "需要相机和录音权限才能运行", Toast.LENGTH_LONG).show();
+                Toast.makeText(this, "Need permissions", Toast.LENGTH_LONG).show();
                 finish();
             }
         }
     }
 
-    /**
-     * 当 OpenGL 纹理创建完成后的回调。
-     * 必须在主线程启动相机操作。
-     */
     @Override
     public void onSurfaceTextureCreated(final SurfaceTexture st) {
         this.surfaceTexture = st;
@@ -134,8 +320,8 @@ public class MainActivity extends AppCompatActivity implements CameraRenderer.On
             @Override
             public void run() {
                 if (hasPermissions()) {
-                    cameraHelper.startCamera(surfaceTexture);
-                    audioHelper.startRecording();
+                    cameraEngine.start(surfaceTexture);
+                    audioEngine.start();
                 }
             }
         });
@@ -144,18 +330,21 @@ public class MainActivity extends AppCompatActivity implements CameraRenderer.On
     @Override
     protected void onPause() {
         super.onPause();
-        glSurfaceView.onPause(); // 暂停 GL 渲染线程
-        cameraHelper.stopCamera(); // 释放相机资源
-        audioHelper.stopRecording(); // 停止录音
+        glSurfaceView.onPause();
+        cameraEngine.stop();
+        audioEngine.stop();
+        if (recorderPipeline.isRecording()) {
+            stopRecording();
+        }
     }
 
     @Override
     protected void onResume() {
         super.onResume();
-        glSurfaceView.onResume(); // 恢复 GL 渲染线程
+        glSurfaceView.onResume();
         if (hasPermissions() && surfaceTexture != null) {
-            cameraHelper.startCamera(surfaceTexture); // 重新打开相机
-            audioHelper.startRecording(); // 重新开始录音
+            cameraEngine.start(surfaceTexture);
+            audioEngine.start();
         }
     }
 }

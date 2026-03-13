@@ -1,4 +1,4 @@
-package com.example.demo;
+package com.example.demo.core.camera;
 
 import android.Manifest;
 import android.content.Context;
@@ -6,65 +6,72 @@ import android.content.pm.PackageManager;
 import android.graphics.SurfaceTexture;
 import android.hardware.camera2.CameraAccessException;
 import android.hardware.camera2.CameraCaptureSession;
-import android.hardware.camera2.CameraCharacteristics;
 import android.hardware.camera2.CameraDevice;
 import android.hardware.camera2.CameraManager;
 import android.hardware.camera2.CaptureRequest;
-import android.hardware.camera2.params.StreamConfigurationMap;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.util.Log;
-import android.util.Size;
 import android.view.Surface;
 
 import androidx.annotation.NonNull;
 import androidx.core.app.ActivityCompat;
 
-import java.util.Arrays;
-import java.util.Collections;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
- * 相机助手类，封装了 Camera2 API 的复杂性。
- * 负责打开相机、配置会话以及将预览数据发送到 SurfaceTexture。
+ * 核心相机引擎
+ * 职责：
+ * 1. 管理 Camera2 生命周期 (Open/Close)
+ * 2. 管理 CaptureSession (Preview/Record)
+ * 3. 支持动态配置输出 Surface (Preview Only vs Preview + Record)
  */
-public class CameraHelper {
-    private static final String TAG = "CameraHelper";
+public class CameraEngine {
+    private static final String TAG = "CameraEngine";
     private final Context context;
+    
     private CameraDevice cameraDevice;
     private CameraCaptureSession captureSession;
     private Handler backgroundHandler;
     private HandlerThread backgroundThread;
+    
+    // 输出目标
+    private SurfaceTexture previewSurfaceTexture;
+    private Surface recordSurface; // 可选：用于直接录制原始流的 Surface
 
-    public CameraHelper(Context context) {
+    public CameraEngine(Context context) {
         this.context = context;
     }
-
+    
     /**
-     * 启动相机预览。
-     * @param surfaceTexture 从 OpenGL 渲染器传递过来的 SurfaceTexture，用于接收预览帧。
+     * 设置录制用的 Surface (MediaCodec Input Surface)
+     * @param surface 如果为 null，则只进行预览；如果不为 null，则同时输出到该 Surface
      */
-    public void startCamera(SurfaceTexture surfaceTexture) {
+    public void setRecordSurface(Surface surface) {
+        this.recordSurface = surface;
+    }
+
+    public void start(SurfaceTexture surfaceTexture) {
+        this.previewSurfaceTexture = surfaceTexture;
+        
         if (ActivityCompat.checkSelfPermission(context, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
-            Log.e(TAG, "未获得相机权限");
+            Log.e(TAG, "Permission not granted: CAMERA");
             return;
         }
 
-        startBackgroundThread(); // 启动后台线程处理相机操作，避免阻塞主线程
+        startBackgroundThread();
 
         CameraManager manager = (CameraManager) context.getSystemService(Context.CAMERA_SERVICE);
         try {
-            // 获取可用相机列表
-            String cameraId = manager.getCameraIdList()[0]; // 默认使用后置摄像头（通常索引为 0）
-            
-            // 为了简化，我们直接取第一个相机。
-            // 在实际应用中，应该检查相机朝向（LENS_FACING_BACK）和功能支持情况。
-
-            // 打开相机
+            // 默认选择第一个相机（通常是后置）
+            // 生产环境应根据 LENS_FACING 筛选
+            String cameraId = manager.getCameraIdList()[0]; 
             manager.openCamera(cameraId, new CameraDevice.StateCallback() {
                 @Override
                 public void onOpened(@NonNull CameraDevice camera) {
                     cameraDevice = camera;
-                    createCameraPreviewSession(surfaceTexture); // 相机打开后，创建预览会话
+                    createCaptureSession();
                 }
 
                 @Override
@@ -85,30 +92,38 @@ public class CameraHelper {
         }
     }
 
-    private void createCameraPreviewSession(SurfaceTexture surfaceTexture) {
+    private void createCaptureSession() {
+        if (cameraDevice == null || previewSurfaceTexture == null) return;
+        
         try {
-            // 设置 SurfaceTexture 的默认缓冲区大小
-            // 理想情况下应该根据相机的支持分辨率进行匹配选择
-            // 这里为了演示简单，硬编码为 1920x1080 (HD)
-            surfaceTexture.setDefaultBufferSize(1920, 1080);
+            // 设置预览缓冲大小，应根据 StreamConfigurationMap 选择最佳尺寸
+            previewSurfaceTexture.setDefaultBufferSize(1920, 1080);
+            Surface previewSurface = new Surface(previewSurfaceTexture);
+            
+            List<Surface> targets = new ArrayList<>();
+            targets.add(previewSurface);
+            
+            // 策略：如果有录制 Surface，则配置为双路输出
+            if (recordSurface != null) {
+                targets.add(recordSurface);
+            }
 
-            // 从 SurfaceTexture 创建 Surface 对象，这是 Camera2 API 需要的目标
-            Surface surface = new Surface(surfaceTexture);
+            // 构建请求：TEMPLATE_RECORD 适用于录像，也兼容预览
+            final CaptureRequest.Builder captureRequestBuilder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_RECORD);
+            captureRequestBuilder.addTarget(previewSurface);
+            
+            if (recordSurface != null) {
+                captureRequestBuilder.addTarget(recordSurface);
+            }
 
-            // 创建预览请求构建器
-            final CaptureRequest.Builder captureRequestBuilder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
-            captureRequestBuilder.addTarget(surface); // 将 Surface 添加为预览目标
-
-            // 创建捕获会话
-            cameraDevice.createCaptureSession(Collections.singletonList(surface), new CameraCaptureSession.StateCallback() {
+            cameraDevice.createCaptureSession(targets, new CameraCaptureSession.StateCallback() {
                 @Override
                 public void onConfigured(@NonNull CameraCaptureSession session) {
                     if (cameraDevice == null) return;
                     captureSession = session;
                     try {
-                        // 设置自动对焦模式为连续拍照对焦
-                        captureRequestBuilder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE);
-                        // 开始重复请求预览帧
+                        // 开启连续视频对焦
+                        captureRequestBuilder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO);
                         captureSession.setRepeatingRequest(captureRequestBuilder.build(), null, backgroundHandler);
                     } catch (CameraAccessException e) {
                         e.printStackTrace();
@@ -117,7 +132,7 @@ public class CameraHelper {
 
                 @Override
                 public void onConfigureFailed(@NonNull CameraCaptureSession session) {
-                    Log.e(TAG, "相机配置失败");
+                    Log.e(TAG, "Camera configuration failed");
                 }
             }, null);
         } catch (CameraAccessException e) {
@@ -125,10 +140,7 @@ public class CameraHelper {
         }
     }
 
-    /**
-     * 停止相机并释放资源
-     */
-    public void stopCamera() {
+    public void stop() {
         if (captureSession != null) {
             captureSession.close();
             captureSession = null;
@@ -141,7 +153,7 @@ public class CameraHelper {
     }
 
     private void startBackgroundThread() {
-        backgroundThread = new HandlerThread("CameraBackground");
+        backgroundThread = new HandlerThread("CameraEngineThread");
         backgroundThread.start();
         backgroundHandler = new Handler(backgroundThread.getLooper());
     }
