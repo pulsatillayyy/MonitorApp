@@ -52,6 +52,12 @@ public class CameraEngine {
         this.recordSurface = surface;
     }
 
+    public void restartSession() {
+        if (cameraDevice != null) {
+            createCaptureSession();
+        }
+    }
+
     public void start(SurfaceTexture surfaceTexture) {
         this.previewSurfaceTexture = surfaceTexture;
         
@@ -95,6 +101,12 @@ public class CameraEngine {
     private void createCaptureSession() {
         if (cameraDevice == null || previewSurfaceTexture == null) return;
         
+        // Ensure previous session is closed
+        if (captureSession != null) {
+            captureSession.close();
+            captureSession = null;
+        }
+
         try {
             // 设置预览缓冲大小，应根据 StreamConfigurationMap 选择最佳尺寸
             previewSurfaceTexture.setDefaultBufferSize(1920, 1080);

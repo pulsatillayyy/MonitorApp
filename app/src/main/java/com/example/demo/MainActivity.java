@@ -177,6 +177,10 @@ public class MainActivity extends AppCompatActivity implements CineRenderer.OnSu
         try {
             recorderPipeline.start(fileName);
             
+            // 重新配置 CameraEngine 以包含录制 Surface
+            cameraEngine.setRecordSurface(recorderPipeline.getInputSurface());
+            cameraEngine.restartSession();
+
             if (!audioEngine.isRecording()) {
                 audioEngine.start();
             }
@@ -190,6 +194,10 @@ public class MainActivity extends AppCompatActivity implements CineRenderer.OnSu
     }
     
     private void stopRecording() {
+        // 先断开 CameraEngine 的连接并重启会话，停止向 Surface 发送数据
+        cameraEngine.setRecordSurface(null);
+        cameraEngine.restartSession();
+        
         recorderPipeline.stop();
         mBinding.btnRecordVideo.setText("REC Video");
         Toast.makeText(this, "Recording Saved", Toast.LENGTH_SHORT).show();

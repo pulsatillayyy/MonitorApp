@@ -51,6 +51,8 @@ public class MP4Recorder implements IRecorderPipeline, AudioEngine.OnAudioDataLi
     private Uri mCurrentVideoUri;
     private ParcelFileDescriptor mPfd;
 
+    private Thread mVideoDrainThread;
+
     public MP4Recorder(Context context, int width, int height) {
         this.context = context;
         this.mWidth = width;
@@ -104,6 +106,8 @@ public class MP4Recorder implements IRecorderPipeline, AudioEngine.OnAudioDataLi
         
         isRecording = true;
         mStartTimeNano = System.nanoTime();
+        
+        startVideoDrainThread();
     }
 
     private void prepareVideoEncoder() throws IOException {
@@ -133,9 +137,34 @@ public class MP4Recorder implements IRecorderPipeline, AudioEngine.OnAudioDataLi
         return mInputSurface;
     }
 
+    private void startVideoDrainThread() {
+        mVideoDrainThread = new Thread(() -> {
+            while (isRecording) {
+                drainVideoEncoder(false);
+                try {
+                    Thread.sleep(10);
+                } catch (InterruptedException e) {
+                    break;
+                }
+            }
+        });
+        mVideoDrainThread.start();
+    }
+
+    private void stopVideoDrainThread() {
+        if (mVideoDrainThread != null) {
+            try {
+                mVideoDrainThread.join();
+                mVideoDrainThread = null;
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+        }
+    }
+
     @Override
     public void drainVideoEncoder(boolean endOfStream) {
-        if (!isRecording) return;
+        if (!isRecording && !endOfStream) return;
         if (endOfStream) {
             try {
                 mVideoEncoder.signalEndOfInputStream();
@@ -212,6 +241,8 @@ public class MP4Recorder implements IRecorderPipeline, AudioEngine.OnAudioDataLi
     public void stop() {
         if (!isRecording) return;
         isRecording = false;
+        
+        stopVideoDrainThread();
 
         try {
             if (mVideoEncoder != null) {
