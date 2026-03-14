@@ -24,11 +24,13 @@ import androidx.core.content.ContextCompat;
 
 import com.example.demo.core.audio.AudioEngine;
 import com.example.demo.core.camera.CameraEngine;
+import com.example.demo.core.manager.FunctionManager;
 import com.example.demo.core.recorder.IRecorderPipeline;
 import com.example.demo.core.recorder.MP4Recorder;
 import com.example.demo.core.render.CineRenderer;
 import com.example.demo.databinding.ActivityMainBinding;
 import com.example.demo.ui.settings.SettingsManager;
+import com.example.demo.ui.view.AudioWaveformView;
 
 import java.io.IOException;
 import java.text.SimpleDateFormat;
@@ -59,6 +61,7 @@ public class MainActivity extends AppCompatActivity implements CineRenderer.OnSu
     private AudioEngine audioEngine;
     private IRecorderPipeline recorderPipeline;
     private SettingsManager settingsManager;
+    private FunctionManager functionManager;
     
     private SurfaceTexture surfaceTexture; 
     private ActivityMainBinding mBinding;
@@ -81,6 +84,9 @@ public class MainActivity extends AppCompatActivity implements CineRenderer.OnSu
         cameraEngine = new CameraEngine(this);
         audioEngine = new AudioEngine(this);
         
+        // 初始化功能管理器
+        functionManager = new FunctionManager(this, cineRenderer, audioEngine, mBinding.audioWaveformView);
+        
         // 默认初始化录制器
         recorderPipeline = new MP4Recorder(this, 1920, 1080);
         updateRecorderConnections();
@@ -94,9 +100,7 @@ public class MainActivity extends AppCompatActivity implements CineRenderer.OnSu
     
     private void updateRecorderConnections() {
         // 连接音频：AudioEngine -> Recorder
-        if (recorderPipeline instanceof AudioEngine.OnAudioDataListener) {
-            audioEngine.setAudioDataListener((AudioEngine.OnAudioDataListener) recorderPipeline);
-        }
+        audioEngine.addAudioDataListener((AudioEngine.OnAudioDataListener) recorderPipeline);
         
         cineRenderer.setFilter(CineRenderer.FilterType.NORMAL); // 确保预览是正常的（可选）
         cameraEngine.setRecordSurface(recorderPipeline.getInputSurface());
@@ -104,20 +108,15 @@ public class MainActivity extends AppCompatActivity implements CineRenderer.OnSu
 
     private void setupButtons() {
         mBinding.btnHistogram.setOnClickListener(v -> {
-            Toast.makeText(MainActivity.this, "Histogram (Coming Soon)", Toast.LENGTH_SHORT).show();
-            cineRenderer.setFilter(CineRenderer.FilterType.NORMAL);
-            glSurfaceView.requestRender();
+            functionManager.toggleHistogram();
         });
 
         mBinding.btnWaveform.setOnClickListener(v -> {
-            Toast.makeText(MainActivity.this, "Waveform (Coming Soon)", Toast.LENGTH_SHORT).show();
-            cineRenderer.setFilter(CineRenderer.FilterType.NORMAL);
-            glSurfaceView.requestRender();
+            functionManager.toggleWaveform();
         });
 
         mBinding.btnMonochrome.setOnClickListener(v -> {
-            Toast.makeText(MainActivity.this, "Monochrome Mode", Toast.LENGTH_SHORT).show();
-            cineRenderer.setFilter(CineRenderer.FilterType.MONOCHROME);
+            functionManager.toggleMonochrome();
             glSurfaceView.requestRender();
         });
 

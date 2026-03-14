@@ -10,6 +10,9 @@ import android.util.Log;
 
 import androidx.core.app.ActivityCompat;
 
+import java.util.ArrayList;
+import java.util.List;
+
 /**
  * 音频采集引擎
  * 职责：
@@ -27,7 +30,7 @@ public class AudioEngine {
     private Thread recordingThread;
     private final Context context;
     
-    private OnAudioDataListener mAudioDataListener;
+    private List<OnAudioDataListener> mAudioDataListeners = new ArrayList<>();
 
     public interface OnAudioDataListener {
         void onAudioData(byte[] data, int size);
@@ -37,8 +40,22 @@ public class AudioEngine {
         this.context = context;
     }
     
+    public void addAudioDataListener(OnAudioDataListener listener) {
+        if (!mAudioDataListeners.contains(listener)) {
+            mAudioDataListeners.add(listener);
+        }
+    }
+
+    public void removeAudioDataListener(OnAudioDataListener listener) {
+        mAudioDataListeners.remove(listener);
+    }
+    
+    // Deprecated: use addAudioDataListener
     public void setAudioDataListener(OnAudioDataListener listener) {
-        this.mAudioDataListener = listener;
+        mAudioDataListeners.clear();
+        if (listener != null) {
+            mAudioDataListeners.add(listener);
+        }
     }
 
     public void start() {
@@ -76,8 +93,8 @@ public class AudioEngine {
             if (result < 0) {
                 Log.e(TAG, "Audio read error: " + result);
             } else {
-                if (mAudioDataListener != null) {
-                    mAudioDataListener.onAudioData(data, result);
+                for (OnAudioDataListener listener : mAudioDataListeners) {
+                    listener.onAudioData(data, result);
                 }
             }
         }
